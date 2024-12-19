@@ -7,6 +7,8 @@ from utils.type_defs import Strategy
 from utils.helpers import *
 import numpy as np 
 import random 
+from assets.games import stag_hunt, stag_hunt_strategies
+from assets.strategy_config import StrategyConfig
 class AbstractPlayerQueue(ABC):
     def __init__(self):
         self._population = []
@@ -26,6 +28,7 @@ class AbstractPlayerQueue(ABC):
     @property 
     def next_agent_id(self) -> int:
         return self._next_agent_id 
+    
     def add_player(self, player:Player):
         self._population.append(player)
     
@@ -49,7 +52,7 @@ class Player(ABC):
         self.strategy = strategy 
         self.action = strategy.start_action
         self.match_history = []
-        self._fitness = 0
+        self._fitness = 0 
          
 
     @property 
@@ -68,9 +71,12 @@ class Player(ABC):
 
     def update_match_history(self, new_match:tuple[str, ...]):
         self.match_history.append(new_match)
+        # update player strategy 
+        self.action = self.strategy.update_function(self.match_history)
 
     def calculate_fitness(self, strategy_config:StrategyConfig):
         
+        # fitness based on mean of payoffs. could maybe make this more general 
         new_fitness = np.mean(list(map(lambda x : strategy_config.get_result(x), self.match_history)), dtype=float) if len(self.match_history) > 0 else 0 
         self.fitness = new_fitness 
 
@@ -79,39 +85,6 @@ class Player(ABC):
 
 
         
-
-a, *rest = [1, 2, 3]
-print(rest)
-
-class StrategyConfig:
-    def __init__(self, action_list_dict:dict[tuple[str, ...], int]):
-        self.payoff_dict:dict[str, dict[tuple[str, ...], int]] = defaultdict(lambda : {})
-        self.num_players = 0
-        
-        self.populate_dict(action_list_dict)
-        
-    @property 
-    def action_list(self):
-        return set([a for a in self.payoff_dict.keys()])
-    def populate_dict(self, action_list_dict:dict[tuple[str, ...], int]):
-        
-        for a_list, payoff in action_list_dict.items():
-            player_action, *other_actions = a_list 
-            self.num_players = len(a_list)
-            self.payoff_dict[player_action][tuple(other_actions)] = payoff
-
-    def get_result(self, match_strats:tuple[str, ...]):
-        p_action, *other_actions = match_strats
-        return self.payoff_dict[p_action][tuple(other_actions)]
-        
-testconfig = {
-    ("hare", "hare"): 3,
-    ("stag", "stag"): 7,
-    ("hare", "stag"): 4,
-    ("stag", "hare"): 0
-}
-newconfig = StrategyConfig(testconfig)
-
 class MoranPlayerGame(AbstractPlayerQueue):
     def __init__(self, strat_nums:List[tuple[Strategy, int]], strat_config:StrategyConfig):
         super().__init__()
@@ -120,10 +93,10 @@ class MoranPlayerGame(AbstractPlayerQueue):
             for _ in range(stratcount):
                 self.create_player(True, strat)
 
-    
 
     def play_game(self, players:list[Player]):
         for idx, p in enumerate(players):
+            # make each player first in their match history tuple
             player_result_arr:list[str] = []
             for i in range(len(players)):
                 if i == idx:
@@ -133,71 +106,59 @@ class MoranPlayerGame(AbstractPlayerQueue):
             
             p.update_match_history(tuple(full_result_arr))
             
-    # def full_round(self):
-    #     rand_array:list[int] = [i for i in range(len(self.population))]
-    #     random.shuffle(rand_array)
-    #     print(rand_array)
-    #     for i in range(len(self.population)//self.strat_config.num_players):
-    #         match_indices = rand_array[i*self.strat_config.num_players:(i+1)*self.strat_config.num_players]
-    #         players_matching = [self.population[j] for j in match_indices]
-    #         self.play_game(players_matching)
-
+    # everyone plays someone random (unless there's a remainder, who won't play this iteration)
     def full_round(self):
         match_indices = play_round(self.population_size, self.strat_config.num_players)
-        print(match_indices)
+
         for index_list in match_indices:
             players_matching = [self.population[j] for j in index_list]
             self.play_game(players_matching)
+    
+    def iterated_full_rounds(self, n_iters):
+        for _ in range(n_iters):
+            self.full_round()
 
-    def update_players(self):
+    # randomly generate matches, players may have many more matches than others 
+    def iterated_matches(self, n_iters):
+        match_indices = iterate_matches(self.population_size, self.strat_config.num_players, n_iters)
+        for index_list in match_indices:
+            players_matching = [self.population[j] for j in index_list]
+            self.play_game(players_matching)
+    
+    # get the fitness for each player. Create new player w best player's strategy and randomly remove a player from the pop 
+    def update_players(self, clear_history=True):
         for p in self.population:
             p.calculate_fitness(strategy_config=self.strat_config)
         
         self.population.sort(key=lambda x : x.fitness, reverse=True)
-        for f in self.population:
-            print(f)
+
+        # effectively homogenous pop, stop updating 
+        if self.population[0].fitness == self.population[-1].fitness:
+            return False 
         
-        # fittest_player_strat = self.population[0].strategy 
-        # fit_child = self.create_player(False, fittest_player_strat)
-        # replaced_idx = np.random.randint(len(self.population))
-        # self.population[replaced_idx] = fit_child 
-
-
-
-
-
-
-# class MoranPlayer(AbstractPlayer): 
-#     def __init__(self):
         
-#         self.typeofgame = "moran"
-#         self.match_history = []
+        fittest_player_strat = self.population[0].strategy 
+        fit_child = self.create_player(False, fittest_player_strat)
+        replaced_idx = np.random.randint(len(self.population))
+        self.population[replaced_idx] = fit_child 
+        if clear_history:
+            for p in self.population:
+                p.match_history = []
+        return True 
 
-    
 
-#     def update_match_history(self, new_match:tuple[str, ...]):
-#         self.match_history.append(new_match)
 
-#     def calculate_fitness(self, strategy_config:StrategyConfig):
-#         new_fitness = np.mean(list(map(lambda x : strategy_config.get_result(x), self.match_history)), dtype=float)
-#         self.fitness = new_fitness 
-        
 
-always_hare = Strategy(
-    name="ALWAYS_HARE",
-    start_action="hare",
-    update_function=lambda _ : "hare"
-)
-always_stag = Strategy(
-    name="ALWAYS_STAG",
-    start_action="stag",
-    update_function=lambda _: "stag"
-)
-stratnum_test = [(always_hare, 4), (always_stag, 5)]
 
-test_moran = MoranPlayerGame(stratnum_test, newconfig)
+behaviorconfig = [(stag_hunt_strategies.ALWAYS_HARE.value, 4), (stag_hunt_strategies.ALWAYS_STAG.value, 5)]
 
-test_moran.full_round()
-test_moran.update_players()
-for g in test_moran.population:
-    print(g.match_history)
+test_moran = MoranPlayerGame(behaviorconfig, stag_hunt)
+
+still_running = True 
+rounds_taken = 0 
+while still_running and rounds_taken<1000:
+    test_moran.iterated_full_rounds(5)
+    test_moran.update_players()
+    rounds_taken+=1
+
+

@@ -3,11 +3,9 @@ from abc import ABC, abstractmethod
 from typing import List, NewType  
 from collections import defaultdict 
 class StrategyConfig:
-    def __init__(self, action_list_dict:dict[tuple[str, ...], int], strategies):
+    def __init__(self, action_list_dict:dict[tuple[str, ...], int]):
         self.payoff_dict:dict[str, dict[tuple[str, ...], int]] = defaultdict(lambda : {})
-        self.num_players = 0
-        self.strategies = strategies
-        
+        self.num_players = 0        
         self.populate_dict(action_list_dict)
         
     @property 
